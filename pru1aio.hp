@@ -1,0 +1,142 @@
+// *****************************************************************************/
+// file:   PRU_memAccess_DDR_PRUsharedRAM.hp
+//
+// brief:  PRU_memAccess_DDR_PRUsharedRAM assembly constants.
+//
+//
+//  (C) Copyright 2012, Texas Instruments, Inc
+//
+//  author     M. Watkins
+// *****************************************************************************/
+
+
+#ifndef _PRU_memAccess_DDR_PRUsharedRAM_HP_
+#define _PRU_memAccess_DDR_PRUsharedRAM_HP_
+
+
+// ***************************************
+// *      Global Macro definitions       *
+// ***************************************
+
+// Refer to this mapping in the file - \prussdrv\include\pruss_intc_mapping.h
+#define PRU0_PRU1_INTERRUPT     17
+#define PRU1_PRU0_INTERRUPT     18
+#define PRU0_ARM_INTERRUPT      19
+#define PRU1_ARM_INTERRUPT      20
+#define ARM_PRU0_INTERRUPT      21
+#define ARM_PRU1_INTERRUPT      22
+
+#define CONST_PRUCFG	     C4
+#define CONST_PRUDRAM        C24
+#define CONST_PRUSHAREDRAM   C28
+#define CONST_DDR            C31
+
+#define PRU0_CTRL		0x22000
+#define PRU1_CTRL		0x24000
+
+#define PRU0_CTRL_CONTROL	0x0
+#define PRU0_CTRL_COUNTER	0xC
+
+#define PRU_IEP_BASE	0x2E000
+#define PRU_IEP_GLOBAL_CFG	0x0
+#define PRU_IEP_CMP_CFG	0x40
+#define PRU_IEP_CMP_STATUS 0x44
+#define PRU_IEP_CMP0	0x48
+
+// Address for the Constant table Block Index Register (CTBIR)
+#define CTBIR          0x20
+
+// Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
+#define CTPPR_0         0x28
+
+// Address for the Constant table Programmable Pointer Register 1(CTPPR_1)
+#define CTPPR_1         0x2C
+
+#define SHARED_RAM           0x120
+
+.macro  LD32
+.mparam dst,src
+    LBBO    dst,src,#0x00,4
+.endm
+
+.macro  LD16
+.mparam dst,src
+    LBBO    dst,src,#0x00,2
+.endm
+
+.macro  LD8
+.mparam dst,src
+    LBBO    dst,src,#0x00,1
+.endm
+
+.macro ST32
+.mparam src,dst
+    SBBO    src,dst,#0x00,4
+.endm
+
+.macro ST16
+.mparam src,dst
+    SBBO    src,dst,#0x00,2
+.endm
+
+.macro ST8
+.mparam src,dst
+    SBBO    src,dst,#0x00,1
+.endm
+
+
+/*
+	Variables
+		qword current_buffer		0x0
+		qword buffer_count			0x4
+		char buffer_size			0x8
+		char channel_enabled_mask	0x9
+		char sample_average			0xA
+		char sample_soc				0xB
+		char sample_rate			0xC
+		char sampling_enabled		0xD
+		...
+		qword buffer_1_address		0x20
+		qword buffer_2_address		0x24
+		first_buffer				0x28
+
+*/
+#define PRU_RTA_CURRENT_BUFFER		0x0
+#define PRU_RTA_BUFFER_COUNT		0x4
+#define PRU_RTA_BUFFER_SIZE			0x8
+#define	PRU_RTA_CHANNEL_ENABLED		0x9
+#define PRU_RTA_SAMPLE_AVERAGE		0xA
+#define PRU_RTA_SAMPLE_SOC			0xB
+#define PRU_RTA_SAMPLE_RATE			0xC
+#define PRU_RTA_SAMPLE_MODE			0x10
+#define PRU_RTA_CHANNEL_COUNT		0x11
+#define PRU_RTA_BUFFER_BYTES		0x12
+#define PRU_RTA_BUFFER_POSITION		0x16
+#define PRU_RTA_READ_COUNT			0x1A
+#define PRU_RTA_IEP_CLOCK_COUNT		0x1E
+#define PRU_RTA_WRITE_MASK			0x22
+#define PRU_RTA_DIGITAL_OUT			0x26
+#define PRU_RTA_SCRATCH				0x2A
+#define PRU_RTA_BUFFER_1_ADDRESS	0x38
+#define PRU_RTA_BUFFER_2_ADDRESS	0x3C
+#define PRU_RTA_BUFFER_BASE			0x40
+
+#define ADC_BASE 0x44e0d000
+
+#define CONTROL 0x0040
+#define SPEED   0x004c
+#define STEP1   0x0064
+#define DELAY1  0x0068
+#define STATUS  0x0044
+#define STEPCONFIG  0x0054
+#define FIFO0COUNT  0x00e4
+#define FIFO1COUNT  0x00f0
+
+#define ADC_FIFO0DATA   (ADC_BASE + 0x0100)
+#define ADC_FIFO1DATA   (ADC_BASE + 0x0200)
+
+#define RTA_STOPPED 0
+#define RTA_READY 1
+#define RTA_CONTINUOUS 2
+
+#endif //_PRU_memAccess_DDR_PRUsharedRAM_

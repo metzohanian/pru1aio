@@ -1,0 +1,41 @@
+/*
+ * This is a template-generated file from BoneScript
+ */
+
+/dts-v1/;
+/plugin/;
+
+/{
+    compatible = "ti,beaglebone", "ti,beaglebone-black";
+    part_number = "PRU1AIO-GPIO-OUT";
+
+    exclusive-use =
+        "P9.31",
+		"P9.29",
+        "pr1_pru0_pru_r30_0",
+		"pr1_pru0_pru_r30_1";
+
+    fragment@0 {
+        target = <&am33xx_pinmux>;
+        __overlay__ {
+            bs_pinmode_pru_out: pinmux_pinmode_pru_out {
+                pinctrl-single,pins = <
+					0x190 0x5 /* LoadGeneratorSolenoid 		r30.0	P9.31 */
+					0x194 0x5 /* Clamp					 	r30.1	P9.29 */
+				>;
+            };
+        };
+    };
+
+    fragment@1 {
+        target = <&ocp>;
+        __overlay__ {
+            bs_pinmode_pru_out_pinmux {
+                compatible = "bone-pinmux-helper";
+                status = "okay";
+                pinctrl-names = "default";
+                pinctrl-0 = <&bs_pinmode_pru_out>;
+            };
+        };
+    };
+};
