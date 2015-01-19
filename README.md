@@ -15,6 +15,7 @@ The code is largely a rewrite of code found on Google Groups (almost entirely re
  - Configurable buffer size/callback rate, double-buffered.
  - Ring buffer support.
  - Missed buffer errors.
+ - Start/Pause/Stop/Reset the firmware.
 
 It is currently a work-in-progress, and not ready for use to speak of.
 
@@ -32,3 +33,4 @@ It is currently a work-in-progress, and not ready for use to speak of.
  - C# wrapper [Not Started]
  - Rust wrapper [Not Started]
  - Proper documentation [Not Started]
+ - Start/Pause/Stop/Reset the firmware. [Complete ?]
