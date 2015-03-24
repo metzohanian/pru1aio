@@ -1,15 +1,45 @@
-#include "pru1aio.h"
+#include "include/pru1aio.h"
+#include "pru0aio_bin.h"
+#include "pru1aio_bin.h"
+#include "clearpru_bin.h"
+
+void pru_printf_hello(char* world) {
+	printf("Hello, %s\n", world);
+}
 
 void pru_rta_clear_pru(int PRU) {
-	prussdrv_pru_enable(PRU);
-    prussdrv_exec_program (PRU, "./clearpru.bin");
-	prussdrv_pru_disable(PRU);
+//	prussdrv_pru_enable(PRU);
+    prussdrv_exec_code (PRU, PRUcode_clear, sizeof(PRUcode_clear));
+//	prussdrv_pru_disable(PRU);
 }
 
 void pru_rta_start_firmware() {
-    pru_rta_clear_pru(PRU_NUM1);
-	prussdrv_pru_enable(PRU_NUM1);
-    prussdrv_exec_program (PRU_NUM1, "./pru1aio.bin");
+	//prussdrv_pru_enable(PRU_NUM0);
+    //if (prussdrv_exec_program(PRU_NUM0, "./pru0aio.bin") != 0) {
+	if (prussdrv_exec_code(PRU_NUM0, PRUcode_pru0, sizeof(PRUcode_pru0)) != 0) {
+		fprintf(stderr, "prussdrv_exec_code(PRU0) failed\n");
+	}
+	
+	//prussdrv_pru_enable(PRU_NUM1);
+    //if (prussdrv_exec_program(PRU_NUM1, "./pru1aio.bin") != 0) {
+	if (prussdrv_exec_code(PRU_NUM1, PRUcode_pru1, sizeof(PRUcode_pru1)) != 0) {
+		fprintf(stderr, "prussdrv_exec_code(PRU1) failed\n");
+	}
+}
+
+pru_rta_readings* pru_rta_init_capture_buffer(pru_shared_mem *pru_mem) {
+	return (pru_rta_readings*)malloc(sizeof(pru_rta_readings) * pru_mem->control.buffer_size);
+}
+
+pru_rta_call_state *pru_rta_init_call_state() {
+	pru_rta_call_state *call_state = malloc(sizeof(pru_rta_call_state));
+	call_state->conditions = pru_rta_init_conditions();
+	return call_state;
+}
+
+void pru_rta_free_call_state(pru_rta_call_state *call_state) {
+	pru_rta_destroy_conditions(call_state->conditions);
+	free(call_state);
 }
 
 pru_rta_conditions *pru_rta_init_conditions() {
@@ -91,70 +121,113 @@ void pru_rta_set_digital_out(pru_shared_mem *pru_mem, unsigned int write_mask, u
 
 void pru_rta_start_capture(
 		pru_shared_mem *pru_mem, 
-		void (*async_call)(unsigned int buffer_count, unsigned short buffer_size, pru_rta_readings *captured_buffer, pru_rta_call_state* call_state, pru_shared_mem *pru_mem), 
-		pru_rta_call_state* call_state) {
+		pru_rta_readings buffer[],
+		pru_rta_call_state* call_state, 
+		void (*async_call)(unsigned int buffer_count, unsigned short buffer_size, pru_rta_readings *captured_buffer, pru_rta_call_state* call_state, pru_shared_mem *pru_mem)) {
 		
 	unsigned short sample_value = 0;
 	int buffer_count = 0;
 	int target_buff = 1;
 	int signals = 0;
-	int current_buffer = 0;
-	pru_rta_readings *current_readings = malloc(pru_mem->control.buffer_size * sizeof(pru_rta_readings));
+	int mean_areadings[8];
+	int mean_dreading = 0;
 	
 	pru_rta_async_capture = async_call;
+	
 	pru_mem->control.sample_mode = RTA_CONTINUOUS;
 	do {
-		buffer_count = 0;
+		//print_pru_map(pru_mem);
+		int buffer_index = 0;
+
+		for (int i = 0; i < 8; i++) mean_areadings[i] = 0;
+		mean_dreading = 0;
+
+		buffer_count = pru_mem->control.buffer_count;
+		signals++;
+
+		if (signals > buffer_count) {
+			signals = buffer_count;
+		} else {
+		
+			target_buff = 0;
+			if (pru_mem->control.current_buffer == 0x1DEAD1){ // First buffer is ready
+				target_buff = 1;
+			} else if(pru_mem->control.current_buffer == 0x2DEAD2){ // Second buffer is ready
+				target_buff = 2;
+			}
+			if (target_buff != 1 && target_buff != 2)
+				continue;
+			
+			for(int i=0; i < pru_mem->control.buffer_size * (pru_mem->control.channel_count + 1); i+=pru_mem->control.channel_count + 1) {
+				buffer[buffer_index].buffer = target_buff;
+				// Read Analog values
+				for (int j = i; j < i + pru_mem->control.channel_count; j++) {
+					if (target_buff == 1) {
+						sample_value = pru_mem->buffer_1[j];
+					} else if (target_buff == 2) {
+						sample_value = pru_mem->buffer_2[j];
+					} else {
+						sample_value = 0xFF;
+					}
+					short adc_channel = pru_rta_adc_channel(sample_value);
+					short adc_value = pru_rta_adc_value(sample_value);
+					buffer[buffer_index].readings[adc_channel] = adc_value;
+					mean_areadings[adc_channel] += adc_value;
+				}
+				// Read digital values
+				if (target_buff == 1) {
+					sample_value = pru_mem->buffer_1[i + pru_mem->control.channel_count];
+				} else if (target_buff == 2) {
+					sample_value = pru_mem->buffer_2[i + pru_mem->control.channel_count];
+				} else {
+					sample_value = 0xDEAD;
+				}
+				buffer[buffer_index].digital_in = sample_value;
+				mean_dreading |= sample_value;
+				
+				buffer_index++;
+			}
+			
+			for (int i = 0; i < 8; i++)
+				call_state->buffer_mean.readings[i] = (short)((float)mean_areadings[i] / (float)buffer_index);
+			call_state->buffer_mean.digital_in = mean_dreading;
+				
+			pru_rta_process_conditions(pru_mem->control.buffer_size, buffer, call_state->conditions);
+			
+			(*pru_rta_async_capture)(buffer_count, pru_mem->control.buffer_size, buffer, call_state, pru_mem);
+		
+		}
+		
 		prussdrv_pru_wait_event(PRU_EVTOUT_1);
 		prussdrv_pru_clear_event(PRU_EVTOUT_1, PRU1_ARM_INTERRUPT);
 
-		current_buffer = pru_mem->control.buffer_count;
-		signals++;
-
-		if (signals != current_buffer)
-			printf("Dropped buffer! %d %d\n", signals, current_buffer);
-		target_buff = 0;
-		if (pru_mem->control.current_buffer == 0x1DEAD1){ // First buffer is ready
-			target_buff = 1;
-		} else if(pru_mem->control.current_buffer == 0x2DEAD2){ // Second buffer is ready
-			target_buff = 2;
-		}
-		if (target_buff != 1 && target_buff != 2)
-			continue;
-		for(int i=0; i < pru_mem->control.buffer_size * (pru_mem->control.channel_count + 1); i+=pru_mem->control.channel_count + 1) {
-			current_readings[buffer_count].buffer = target_buff;
-			// Read Analog values
-			for (int j = i; j < i + pru_mem->control.channel_count; j++) {
-				if (target_buff == 1) {
-					sample_value = pru_mem->buffer_1[j];
-				} else if (target_buff == 2) {
-					sample_value = pru_mem->buffer_2[j];
-				} else {
-					sample_value = 0xFF;
-				}
-				current_readings[buffer_count].readings[pru_rta_adc_channel(sample_value)] = pru_rta_adc_value(sample_value);
-			}
-			// Read digital values
-			if (target_buff == 1) {
-				sample_value = pru_mem->buffer_1[i + pru_mem->control.channel_count];
-			} else if (target_buff == 2) {
-				sample_value = pru_mem->buffer_2[i + pru_mem->control.channel_count];
-			} else {
-				sample_value = 0xDEAD;
-			}
-			current_readings[buffer_count].digital_in = sample_value;
-			
-			buffer_count++;
-		}
-		pru_rta_process_conditions(pru_mem->control.buffer_size, current_readings, call_state->conditions);
-		(*pru_rta_async_capture)(current_buffer, pru_mem->control.buffer_size, current_readings, call_state, pru_mem);
 	} while (pru_mem->control.sample_mode == RTA_CONTINUOUS);
 	
-	free(current_readings);
+	pru_rta_clear_pru(PRU_NUM1);
+	pru_rta_clear_pru(PRU_NUM0);
 }
 
-void pru_rta_pause_capture(pru_shared_mem *pru_mem) {
-	pru_mem->control.sample_mode = RTA_READY;
+void pru_rta_test_callback(pru_shared_mem *pru_mem, 
+		pru_rta_readings* buffer,
+		pru_rta_call_state* call_state, 
+		void (*async_call)(unsigned int buffer_count, unsigned short buffer_size, pru_rta_readings *captured_buffer, pru_rta_call_state* call_state, pru_shared_mem *pru_mem)) {
+
+	print_pru_map(pru_mem);
+	
+	for (int i = 0; i < 8; i++)
+		printf("\tC[%d]: %X", i, call_state->buffer_mean.readings[i]);
+		
+	printf("\n");
+		
+	pru_rta_async_capture = async_call;
+
+	pru_rta_readings *current_readings = malloc(1 * sizeof(pru_rta_readings));
+	
+	current_readings[0].buffer= 0x64;
+	for (int i = 0; i < 8; i++)
+		current_readings[0].readings[i] = 7 - i;
+		
+	(*pru_rta_async_capture)(current_readings[0].buffer, 1, current_readings, call_state, pru_mem);
 }
 
 void pru_rta_stop_capture(pru_shared_mem *pru_mem) {
@@ -162,19 +235,37 @@ void pru_rta_stop_capture(pru_shared_mem *pru_mem) {
 }
 
 pru_shared_mem *pru_rta_init() {
-	void* shared_memory;
+	void* shared_memory = 0;
+	pru_shared_mem *pru_memory = 0;
+	
     tpruss_intc_initdata pruss_intc_initdata = PRUSS_INTC_INITDATA;
 
-    prussdrv_init();
-
-    prussdrv_open(PRU_EVTOUT_1);
+	int rtn;
 	
-    prussdrv_pruintc_init(&pruss_intc_initdata);
-    prussdrv_map_prumem(PRUSS0_SHARED_DATARAM, &shared_memory);
+	if((rtn = prussdrv_init()) != 0) {
+		fprintf(stderr, "prussdrv_init() failed\n");
+		return pru_memory;
+	}
 	
+    if((rtn = prussdrv_open(PRU_EVTOUT_1)) != 0) {
+		fprintf(stderr, "prussdrv_open() failed\n");
+		return pru_memory;
+	}
+	
+    if((rtn = prussdrv_pruintc_init(&pruss_intc_initdata)) != 0) {
+		fprintf(stderr, "prussdrv_pruintc_init() failed\n");
+		return pru_memory;
+	}
+	
+    if((rtn = prussdrv_map_prumem(PRUSS0_SHARED_DATARAM, &shared_memory)) != 0) {
+		fprintf(stderr, "prussdrv_pruintc_init() failed\n");
+		return pru_memory;
+	}
+	
+	prussdrv_pru_clear_event(PRU_EVTOUT_0, PRU0_ARM_INTERRUPT);
 	prussdrv_pru_clear_event(PRU_EVTOUT_1, PRU1_ARM_INTERRUPT);
 	
-	pru_shared_mem *pru_memory = (pru_shared_mem*) (shared_memory + OFFSET_SHAREDRAM);
+	pru_memory = (pru_shared_mem*) (shared_memory + OFFSET_SHAREDRAM);
 	pru_memory->control.sample_mode = RTA_STOPPED;
 	
 	return pru_memory;
@@ -196,6 +287,8 @@ void print_pru_map_address(pru_shared_mem *pru_mem) {
 	printf("\tbuffer_position: %x\n", (unsigned int)&(pru_mem->control.buffer_position) - mem_base);
 	printf("\tread_count: %x\n", (unsigned int)&(pru_mem->control.read_count) - mem_base);
 	printf("\tiep_clock_count: %x\n", (unsigned int)&(pru_mem->control.iep_clock_count) - mem_base);
+	printf("\twrite_mask: %x\n", (unsigned int)&(pru_mem->control.write_mask) - mem_base);
+	printf("\tdigital_out: %x\n", (unsigned int)&(pru_mem->control.digital_out) - mem_base);
 	printf("\tscratch: %x\n", (unsigned int)&(pru_mem->control.scratch) - mem_base);
 	printf("\tbuffer[0]: %x\n", (unsigned int)&(pru_mem->buffer_1) - mem_base);
 	printf("\tbuffer[1]: %x\n", (unsigned int)&(pru_mem->buffer_2) - mem_base);
@@ -224,6 +317,8 @@ void print_pru_map(pru_shared_mem *pru_mem) {
 	printf("\tbuffer_position: %u\n", (unsigned int)(pru_mem->control.buffer_position));
 	printf("\tread_count: %u\n", (unsigned int)(pru_mem->control.read_count));
 	printf("\tiep_clock_count: %u\n", (unsigned int)(pru_mem->control.iep_clock_count));
+	printf("\twrite_mask: %u\n", (unsigned int)(pru_mem->control.write_mask));
+	printf("\tdigital_out: %u\n", (unsigned int)(pru_mem->control.digital_out));
 	for (int i = 0; i < 14; i++)
 		printf("\tscratch[%d]: %x\n", i, (unsigned int)(pru_mem->control.scratch[i]));
 	
@@ -232,8 +327,7 @@ void print_pru_map(pru_shared_mem *pru_mem) {
 }
 
 void pru_rta_configure(pru_shared_mem *pru_mem) {
-	pru_mem->buffer_1 = (unsigned short*)(pru_mem) + sizeof(pru_shared_control)/sizeof(unsigned short) + (sizeof(unsigned short*)*2 / sizeof(unsigned short));
-	pru_mem->buffer_2 = pru_mem->buffer_1 + pru_mem->control.buffer_size * (pru_mem->control.channel_count + 1);
+	pru_mem->control.sample_mode = RTA_STOPPED;
 	pru_mem->control.current_buffer = 0;
 	pru_mem->control.buffer_count = 0;
 	pru_mem->control.channel_count = (char)__builtin_popcount((unsigned int)pru_mem->control.channel_enabled_mask);
@@ -241,10 +335,17 @@ void pru_rta_configure(pru_shared_mem *pru_mem) {
 	pru_mem->control.buffer_position = 0;
 	pru_mem->control.iep_clock_count = 200000000 / pru_mem->control.sample_rate;
 	pru_mem->control.read_count = 0;
+	pru_mem->control.write_mask = 0;
+	pru_mem->control.digital_out = 0;
+	
+	pru_mem->buffer_1 = (unsigned short*)(pru_mem) + sizeof(pru_shared_control)/sizeof(unsigned short) + (sizeof(unsigned short*)*2 / sizeof(unsigned short));
+	pru_mem->buffer_2 = pru_mem->buffer_1 + pru_mem->control.buffer_size * (pru_mem->control.channel_count + 1);
+	
 	for (int i = 0; i < 14; i++)
 		pru_mem->control.scratch[i] = 0;
 	pru_mem->control.sample_mode = RTA_READY;
 	sleep(1);		// Give configuration time to settle before launch -- this should be done with semaphores
+	
 }
 
 unsigned short pru_rta_adc_channel(unsigned short value) {

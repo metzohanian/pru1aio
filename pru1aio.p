@@ -71,23 +71,6 @@
 	MOV r31.b0, PRU1_ARM_INTERRUPT+16
 .endm
 
-.macro GUARD
-.mparam debug_val
-	MOV guard_reg, 8000
-	MOV debug_reg, debug_val
-	SBCO debug_reg, CONST_PRUSHAREDRAM, PRU_RTA_SCRATCH + 13, 1
-	SBCO buffer_position, CONST_PRUSHAREDRAM, PRU_RTA_BUFFER_POSITION, 4
-	
-	QBLT NO_ACTION, guard_reg, buffer_position
-	
-	MOV debug_reg, 1
-	SBCO debug_reg, CONST_PRUSHAREDRAM, PRU_RTA_SCRATCH + 12, 1
-	THROW_SIGNAL 
-	HALT
-
-NO_ACTION:
-.endm
-
 .macro READADC
 	MOV read_count, 0
 	SBCO read_count, CONST_PRUSHAREDRAM, PRU_RTA_READ_COUNT, 4
@@ -98,11 +81,21 @@ NO_ACTION:
 	LBCO half_position, CONST_PRUSHAREDRAM, PRU_RTA_BUFFER_BYTES, 4
 	LSR half_position, half_position, 1
 	
+	CLEAR_ALL_FIFO0:
+		LBBO tmp0, adc_, FIFO0COUNT, 4		// Load fifocount from fifo0counter
+		AND tmp0, tmp0, 0xFF				// Mask lowest 8 bits
+		QBEQ FIFO_CLEARED, tmp0, 0			// If FIFO0 is clear, continue setup
+		LBBO value, fifodata, 0, 4			// Read existing FIFO0 to clear
+		QBA CLEAR_ALL_FIFO0					// Check for more readings
+
+	FIFO_CLEARED:							// The Guard Register checks for buffer_pointer overflow
+		LBCO guard_reg, CONST_PRUSHAREDRAM, PRU_RTA_BUFFER_BYTES, 4
+	
 	// Clear FIFO0
     INITV:
 		LBCO tmp0, CONST_PRUSHAREDRAM, PRU_RTA_SAMPLE_MODE, 1
-		QBEQ CONFIGURE, tmp0, RTA_STOPPED
-		QBEQ INITV, tmp0, RTA_READY
+		QBEQ CONFIGURE, tmp0.b0, RTA_STOPPED
+		QBEQ INITV, tmp0.b0, RTA_READY
 											//	Address of Buffer 1 
 		MOV buffer_pointer, PRU_RTA_BUFFER_BASE
 											//	Counting variable set to buffer size
@@ -143,12 +136,16 @@ NO_ACTION:
 		QBNE READ_ALL_FIFO0, tmp0, 0		// Repeat FIFO0 Read if there are more channels
 		
 											// Write Digitial In to buffer
-		SBCO r31.w0, CONST_PRUSHAREDRAM, buffer_pointer, 2
+		SBCO r31, CONST_PRUSHAREDRAM, buffer_pointer, 2
 											// Increment buffer pointer to next dword
         ADD buffer_pointer, buffer_pointer, 2
 		
 											// decrement count by the number of values read
         SUB buffer_position, buffer_position, buffer_stride
+		QBLE NO_OVERFLOW, guard_reg, buffer_position
+		MOV buffer_position, 0x00000000
+	
+	NO_OVERFLOW:
 		SBCO buffer_position, CONST_PRUSHAREDRAM, PRU_RTA_BUFFER_POSITION, 4
 		
 		LSR tmp0, buffer_stride, 1			// Take half the memory decrement
@@ -156,19 +153,6 @@ NO_ACTION:
 		ADD read_count, read_count, 1
 											// Write read count to read counter memory
 		SBCO read_count, CONST_PRUSHAREDRAM, PRU_RTA_READ_COUNT, 4 
-		
-		/*
-			Read and write DIO
-		*/
-		LBCO write_mask, CONST_PRUSHAREDRAM, PRU_RTA_WRITE_MASK, 4
-		QBEQ NO_DIGITAL_WRITE, write_mask, 0
-		NOT tmp0, write_mask				
-		AND tmp0, r30, tmp0					// Preserve unwritten bits in r30
-		LBCO digital_out, CONST_PRUSHAREDRAM, PRU_RTA_DIGITAL_OUT, 4
-		AND tmp1, write_mask, digital_out	// Set bit states for write mask
-		OR r30, tmp1, tmp0					// Write bits to r30
-		MOV write_mask, 0					// Prevents multiple writes of the same signal
-		SBCO write_mask, CONST_PRUSHAREDRAM, PRU_RTA_WRITE_MASK, 4
 		
 	NO_DIGITAL_WRITE:
 		
@@ -218,7 +202,6 @@ START:
     ST32 r0, tmp0					// Store r0 value to that pointer ... whatever.  I copied this.
 	
 CONFIGURE:
-	
 	/*
 		Enable the IEP Counter with CMP0 reset
 		This will act as our heartbeat to let us know that we should service
@@ -312,12 +295,12 @@ INCREMENT_CHANNEL:
 	
 	// END OF CONFIGURATION, WAIT FOR START-OF-CAPTURE
 	LBCO tmp0, CONST_PRUSHAREDRAM, PRU_RTA_SAMPLE_MODE, 1
-	QBEQ CONFIGURE, tmp0, RTA_STOPPED
+	QBEQ CONFIGURE, tmp0.b0, RTA_STOPPED
 
 WAIT_READY:
 	// END OF CONFIGURATION, WAIT FOR START-OF-CAPTURE
 	LBCO tmp0, CONST_PRUSHAREDRAM, PRU_RTA_SAMPLE_MODE, 1
-	QBEQ WAIT_READY, tmp0, RTA_READY
+	QBEQ WAIT_READY, tmp0.b0, RTA_READY
 	
     //Read ADC and FIFOCOUNT
     READADC

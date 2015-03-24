@@ -13,13 +13,15 @@
 #include <pruss/prussdrv.h>
 #include <pruss/pruss_intc_mapping.h>
 
-#include "pru1aio.h"
+#include <pru1aio.h>
 
 pru_shared_mem *pru_memory;
 
 /******************************************************************************
 * Main                                                                        * 
 ******************************************************************************/
+
+int pattern = 0;
 
 void do_buffer_work(unsigned int buffer_count, unsigned short buffer_size, pru_rta_readings *captured_buffer, pru_rta_call_state *call_state, pru_shared_mem *pru_mem) {
 	for (int i = 0; i < buffer_size; i++) {
@@ -31,16 +33,33 @@ void do_buffer_work(unsigned int buffer_count, unsigned short buffer_size, pru_r
 		call_state->records++;
 	}
 	call_state->signals++;
-	pru_rta_set_digital_out(pru_mem, 0x3, 0x3);
+	pru_rta_set_digital_out(pru_mem, 0x0F, pattern);
+	pattern++;
+	pattern %= 16;
 	if (call_state->records >= call_state->maximum_records)
 		pru_rta_stop_capture(pru_mem);
+	return;
+}
+
+void test_buffer_work(unsigned int buffer_count, unsigned short buffer_size, pru_rta_readings *captured_buffer, pru_rta_call_state *call_state, pru_shared_mem *pru_mem) {
+	printf("\nTest Buffer Async Callback:\n");
+	
+	printf("Captured Buffer: %d\n", buffer_size);
+	
+	for (int i = 0; i < buffer_size; i++) {
+		for (int channel = 0; channel < pru_mem->control.channel_count; channel++) {
+			printf("\tR[%d]: %X", channel, captured_buffer[i].readings[channel]);
+		}
+	}
+	
+	printf("\n\n");
+	
 	return;
 }
 
 int main (int argc, char* argv[])
 {
 	int capture_time_ms = CAPTURE_TIME_MS;
-	pru_rta_call_state *call_state = malloc(sizeof(pru_rta_call_state));
 	struct timeval start_time, end_time;
 
 	if (argc < 4) {
@@ -60,22 +79,22 @@ int main (int argc, char* argv[])
 	pru_memory->control.channel_enabled_mask = 0x7F;
 	pru_memory->control.sample_soc = 15;
 	pru_memory->control.sample_average = 16;
-	pru_memory->control.sample_rate = 2000;
+	pru_memory->control.sample_rate = 8000;
 	sscanf(argv[3], "%d", &(pru_memory->control.sample_rate));
+	
+	pru_rta_readings *buffer = pru_rta_init_capture_buffer(pru_memory);
 	
 	pru_rta_configure(pru_memory);
 	
 	print_pru_map_address(pru_memory);
 	
+	pru_rta_call_state *call_state = pru_rta_init_call_state();
 	call_state->maximum_records = capture_time_ms / 1000.0 * pru_memory->control.sample_rate;
 	call_state->readings = malloc(call_state->maximum_records * sizeof(pru_rta_readings));
 	call_state->records = 0;
 	call_state->signals = 0;
 	call_state->caller_state = 0;
 	
-	call_state->conditions = pru_rta_init_conditions();
-	printf("%x\n", (unsigned int)call_state->conditions);
-	//(pru_rta_conditions *conditions, comparator condition, input_signal signal, unsigned short comp1, unsigned short comp2);
 	pru_rta_add_condition(call_state->conditions, "Equals 3000", greater_eq, CHANNEL_0, 3000, 0);
 	pru_rta_add_condition(call_state->conditions, "Equals 3100", equal, CHANNEL_0, 3100, 0);
 	pru_rta_add_condition(call_state->conditions, "Equals 3200", less_eq, CHANNEL_0, 3200, 0);
@@ -103,8 +122,14 @@ int main (int argc, char* argv[])
 	printf("Start Data Capture\n");
 	
 	gettimeofday(&start_time, NULL);
-	pru_rta_start_capture(pru_memory, & do_buffer_work, call_state);
+	pru_rta_start_capture(pru_memory, buffer, call_state, & do_buffer_work);
 	gettimeofday(&end_time, NULL);
+	
+	pru_rta_configure(pru_memory);
+	call_state->records = 0;
+	call_state->signals = 0;
+	pru_rta_start_firmware();
+	pru_rta_start_capture(pru_memory, buffer, call_state, & do_buffer_work);
 	
 	float elapsed_time = end_time.tv_sec - start_time.tv_sec + (end_time.tv_usec - start_time.tv_usec ) / 1e6; 
 
@@ -122,13 +147,6 @@ int main (int argc, char* argv[])
 		printf("\n");
 	}
 	
-	
-    /* Disable PRU*/
-    prussdrv_pru_disable(PRU_NUM1);
-    prussdrv_exit();
-
-	pru_rta_destroy_conditions(call_state->conditions);
-	
 	printf("Writing results to %s\n", argv[1]);
 
 	FILE *fp = fopen(argv[1], "w");
@@ -142,6 +160,11 @@ int main (int argc, char* argv[])
 		fprintf(fp, ",%04x\n", (unsigned int)call_state->readings[l].digital_in);
 	}
 	fclose(fp);
+	
+	free(call_state->readings);
+	pru_rta_free_call_state(call_state);
+	free(buffer);
+    prussdrv_exit();
 	
     return(0);
 }
