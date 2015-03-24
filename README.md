@@ -34,7 +34,7 @@ It is currently a work-in-progress, and not ready for use to speak of.
  - Proper documentation [Not Started]
  - Start/Pause/Stop/Reset the firmware. [Complete]
  
- ## Usage
+## Usage
  
   - Several examples are in main.c
   - In general, you will need a callback function with a signature as follows: void callback(unsigned int buffer_count, unsigned short buffer_size,
