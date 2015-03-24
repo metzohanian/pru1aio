@@ -220,8 +220,7 @@ CONFIGURE:
 		This code expects the primary ARM CPU to respond to a buffer call every 100 samples.  This
 		includes a system interrupt.  This means while we could safely call 50Ksps with this PRU code,
 		it's not clear if the ARM system can handle 500 interrupts/second.  40-50 interrupts/second
-		is probably a reasonable upper bound to do anything useful with, so 4-5Ksps is probably a reasonable
-		upper bound.  Running the code "unfettered" results in around 6150 samples/second.
+		is probably a reasonable upper bound to do anything useful with.
 		
 		If we put a fixed delay in, the skew would compound over time, making timing very hard.
 		
