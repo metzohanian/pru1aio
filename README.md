@@ -34,6 +34,9 @@ It is currently a work-in-progress, and not ready for use to speak of.
  - Proper documentation [Not Started]
  - Start/Pause/Stop/Reset the firmware. [Complete]
  
+## Requirements
+ - If you are using several of the DIOs, you will have to disable HDMI and the eMMC
+ 
 ## Usage
  
   - Several examples are in main.c
