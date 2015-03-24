@@ -81,3 +81,4 @@ pru_rta_destroy_conditions(call_state->conditions);
 
 ## Known Issues
  - Segfaults on first run.
+ - Uses the IEP counter on PRU1 to handle sample timings.  It should use one of the hardware timers, instead.
